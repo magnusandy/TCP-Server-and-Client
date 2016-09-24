@@ -6,6 +6,7 @@ import "bufio"
 import "os"
 
 //Handles the input sent back to the client from the server, simply writes it to the console
+//
 func getFromServer(conn net.Conn){
   reader := bufio.NewReader(conn)
   for{
