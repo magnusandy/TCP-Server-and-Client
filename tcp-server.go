@@ -11,6 +11,9 @@ import "strings"
 const SERVER_IP string = "localhost";
 const SERVER_PORT string = "8080";
 const COMMAND_PREFIX string = "/";
+const NOT_IN_ROOM_ERR string = "You are not in a room yet";
+const NO_ROOM_NAME_GIVEN_ERR string = "You must specify a room name";
+
 
 //COMMANDS
 const HELP_COMMAND string = COMMAND_PREFIX+"help";
@@ -19,11 +22,18 @@ const CREATE_ROOM_COMMAND string = COMMAND_PREFIX+"createRoom"; //creates a room
 const LIST_ROOMS_COMMAND string = COMMAND_PREFIX+"listRooms"
 const JOIN_ROOM_COMMAND string = COMMAND_PREFIX+"join";//   /join roomname will add a user to a rooms list of clients and switch the user to that room
 const CURR_ROOM_COMMAND string = COMMAND_PREFIX+"currentRoom";
+const CURR_ROOM_USERS_COMMAND string = COMMAND_PREFIX+"currentUsers";
+const LEAVE_ROOM_COMMAND string = COMMAND_PREFIX+"leaveRoom";//TODO
+
 var HELP_INFO = [...]string {"help and command info: ",
  HELP_COMMAND+": use this command to get some help",
  QUIT_COMMAND+": Safely exit the system",
  CREATE_ROOM_COMMAND+" roomName : creates a room with the name roomName",
  LIST_ROOMS_COMMAND+": lists all rooms available for joining",
+ JOIN_ROOM_COMMAND+" roomName: adds you to a chatroom",
+ CURR_ROOM_COMMAND+": tells you what your current room is",
+ CURR_ROOM_USERS_COMMAND+": gives a you a list of users in a room",
+ LEAVE_ROOM_COMMAND+" roomName: removes you from specified room",
 }
 var MessageStorageArray []string;
 var connectionArray []net.Conn;
@@ -40,7 +50,9 @@ type Room struct{
   creator *Client;
 }
 
+//Creates a new room, with a specified roomCreator and roomName. the room will be added to the global list of rooms, if room is not unique, the client will be messaged
 func createRoom(roomName string, roomCreator *Client) Room {
+  //TODO check to make sure the room name is unique
   var newRoom = Room{
     name: roomName,
     clientList: make([]*Client, 0),//room will start empty, we wont add the creator in
@@ -192,20 +204,51 @@ func checkForCommand(message string, client *Client) {
     } else if parsedCommand[0] == QUIT_COMMAND {
       processQuitCommand(client);
     } else if parsedCommand[0] == CREATE_ROOM_COMMAND {
-      processCreateRoomCommand(client, parsedCommand[1]);//TODO handle the possibility that the user doesnt add an arg just types "/createRoom"
+      // not enough arguments to the command
+      if len(parsedCommand) < 2{
+        client.messageClient(NO_ROOM_NAME_GIVEN_ERR)
+      }else{
+        processCreateRoomCommand(client, parsedCommand[1]);
+      }
     } else if parsedCommand[0] == LIST_ROOMS_COMMAND {
       processListRoomsCommand(client);
     } else if parsedCommand[0] == JOIN_ROOM_COMMAND {
-      processJoinRoomCommand(client, parsedCommand[1]);
+      //not enough given to the command
+      if len(parsedCommand) < 2{
+        client.messageClient(NO_ROOM_NAME_GIVEN_ERR)
+      }else{
+        processJoinRoomCommand(client, parsedCommand[1]);
+      }
     } else if parsedCommand[0] == CURR_ROOM_COMMAND {
       processCurrRoomCommand(client);
+    }else if parsedCommand[0] == CURR_ROOM_USERS_COMMAND{
+      processCurrRoomUsersCommand(client);
     }
 
   } else { // message is not a command
     WriteToAllChans(message, client);
   }
 }
+
+
+//sends a list of the current users in the room to the client
+func processCurrRoomUsersCommand(client *Client){
+  //check if the user is in a room
+  if client.currentRoom == nil{
+    client.messageClient(NOT_IN_ROOM_ERR)
+    return
+  }
+  client.messageClient("Current users in "+client.currentRoom.name+" are:")
+  for _, users:= range client.currentRoom.clientList {
+    client.messageClient("> "+users.name);
+  }
+}
+//sends a message to the client telling them which room they are currently in, if not in a room, inform the user
  func processCurrRoomCommand (client *Client){
+   if client.currentRoom == nil{
+     client.messageClient(NOT_IN_ROOM_ERR)
+     return
+   }
    client.messageClient("current room: "+client.currentRoom.name);
  }
 
@@ -243,6 +286,7 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   roomToJoin := getRoomByName(roomName);
   if roomToJoin == nil{ //the room doesnt exist
     fmt.Println(client.name+" tried to enter room: "+roomName+" which does not exist");
+    client.messageClient("The room "+roomName+"does not exist")
     return false;
   }
   //Room exists so now we can join it.
@@ -255,9 +299,12 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   }
   //switch users current room to room
   client.currentRoom = roomToJoin;
-  fmt.Println(client.currentRoom.name)
+  fmt.Println(client.name+" has joined room: "+client.currentRoom.name)
+  client.messageClient("You have joined: "+client.currentRoom.name)
   //display all messages in the room
   //TODO
+
+  //
   return true
 }
 
