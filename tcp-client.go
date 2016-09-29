@@ -11,7 +11,7 @@ func getFromServer(conn net.Conn){
   reader := bufio.NewReader(conn)
   for{
     message, _ := reader.ReadString('\n')
-    fmt.Print("Message from server: "+message)
+    fmt.Print(message)
   }
 }
 

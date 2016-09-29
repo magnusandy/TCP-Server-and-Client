@@ -6,6 +6,7 @@ import "bufio"
 import "./myUtils"
 import "time"
 import "strings"
+//import "reflect"
 
 //CONSTANTS
 const SERVER_IP string = "localhost";
@@ -38,7 +39,7 @@ var HELP_INFO = [...]string {"help and command info: ",
 var MessageStorageArray []string;
 var connectionArray []net.Conn;
 var ClientArray []Client;
-var RoomArray []Room;
+var RoomArray []*Room;
 //STRUCTURES
 /*****************Rooms*****************/
 type Room struct{
@@ -46,7 +47,7 @@ type Room struct{
   clientList []*Client;
   createdDate time.Time;
   lastUsedDate time.Time;
-  chatLog []ChatMessage;
+  chatLog []*ChatMessage;
   creator *Client;
 }
 
@@ -58,10 +59,10 @@ func createRoom(roomName string, roomCreator *Client) Room {
     clientList: make([]*Client, 0),//room will start empty, we wont add the creator in
     createdDate: time.Now(),
     lastUsedDate: time.Now(),
-    chatLog: make([]ChatMessage, 0),
+    chatLog: nil,
     creator: roomCreator,
   }
-  RoomArray = append(RoomArray, newRoom);
+  RoomArray = append(RoomArray, &newRoom);
   return newRoom;
 }
 
@@ -80,19 +81,19 @@ func (room Room) isClientInRoom(client *Client) bool {
 
 //Structure holding messages sent to a chat, stores meta information on the client who sent it
 type ChatMessage struct {
-  client Client;
+  client *Client;
   message string;
   createdDate time.Time;
 }
 
 //creates a new instance of a ChatMessage and returns it
-func createChatMessage(cli Client, mess string) ChatMessage {
+func createChatMessage(cli *Client, mess string) *ChatMessage {
  var chatMessage = ChatMessage{
    client: cli,
    message: mess,
    createdDate: time.Now(),
  }
- return chatMessage;
+ return &chatMessage;
 }
 /******************************************/
 
@@ -133,10 +134,17 @@ func (cli *Client) WaitForAWrite(){
 }
 
 //adds message to the clients output channel, messages should be single line, NON delimited strings, that is the message should not include a new line
-func (cli Client) messageClient(message string){
-  message = message+"\n";
+func (cli Client) messageClientFromClient(message string, sender *Client){
+  message = string(sender.name)+" says: "+message+"\n";
   cli.outputChannel <- message;
 }
+
+//without a client argument assumes the message is coming from the server
+func (cli Client) messageClient(message string){
+  message = "Server says: "+message+"\n";
+  cli.outputChannel <- message;
+}
+
 
 
 //Intended to be run on a thread, this function will wait and lisen for messages from the client
@@ -176,7 +184,31 @@ func addClient(conn net.Conn){
   go cli.WaitForAWrite();
 }
 
-
+//sends a message to the clients current room, this function will replacee the WriteToAllChans function which sends a message to every client on the server
+func sendMessageToCurrentRoom(sender *Client, message string){
+//TODO check if the client is currently in a room warn otherwise
+if sender.currentRoom == nil {
+  //sender is not in room yet warn and exit
+  sender.messageClient(NOT_IN_ROOM_ERR);
+  return;
+}
+//get the current room and its list of clients
+//send the message to everyone in the room list that is CURRENTLY in the room
+room := sender.currentRoom;
+room2 := getRoomByName(room.name)
+fmt.Println(room.clientList)
+fmt.Println(room2.clientList)
+chatMessage := createChatMessage(sender, message);
+for _, roomUser := range room.clientList {
+  //check to see if the user is currently active in the room
+  fmt.Println(room.clientList)
+  if ((roomUser.currentRoom.name == room.name) && (roomUser.name != sender.name)) {
+    roomUser.messageClientFromClient(chatMessage.message, chatMessage.client)
+  }
+}
+//save the message into the array of the rooms messages
+room.chatLog = append(room.chatLog, chatMessage);
+}
 
 //writes to all the channels of all the users but the one that posts it, to avoid double posting
 func WriteToAllChans(message string, senderClient *Client){
@@ -226,7 +258,7 @@ func checkForCommand(message string, client *Client) {
     }
 
   } else { // message is not a command
-    WriteToAllChans(message, client);
+    sendMessageToCurrentRoom(client, message);
   }
 }
 
@@ -302,17 +334,25 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   fmt.Println(client.name+" has joined room: "+client.currentRoom.name)
   client.messageClient("You have joined: "+client.currentRoom.name)
   //display all messages in the room
-  //TODO
-
+  displayRoomsMessages(client, roomToJoin)
   //
   return true
 }
+//diplays to the user all the messages of the chatroom, intended to be used when a user first joins a room
+func displayRoomsMessages(client *Client, room *Room){
+  //loop through the chatlog and send the user everything
+  client.messageClient("-----Previous Log-----")
+  for _, messages := range room.chatLog {
+    client.messageClientFromClient(messages.message, messages.client)
+  }
+  client.messageClient("----------------------")
 
+}
 //checks to see if a room with the given name exists in the RoomArray, if it does return it, if not return nil
 func getRoomByName(roomName string) *Room{
   for _, room := range RoomArray{
     if room.name == roomName{
-      return &room;
+      return room;
     }
   }
   return nil;
