@@ -14,6 +14,7 @@ const SERVER_PORT string = "8080";
 const COMMAND_PREFIX string = "/";
 const NOT_IN_ROOM_ERR string = "You are not in a room yet";
 const NO_ROOM_NAME_GIVEN_ERR string = "You must specify a room name";
+const ROOM_NAME_NOT_UNIQUE_ERR string = "The room name you have specified is already in use.";
 
 
 //COMMANDS
@@ -52,8 +53,12 @@ type Room struct{
 }
 
 //Creates a new room, with a specified roomCreator and roomName. the room will be added to the global list of rooms, if room is not unique, the client will be messaged
-func createRoom(roomName string, roomCreator *Client) Room {
-  //TODO check to make sure the room name is unique
+func createRoom(roomName string, roomCreator *Client) *Room {
+  //check uniqueness of name, warn user and abort if not unique
+  if isRoomNameUnique(roomName) == false {
+    roomCreator.messageClientFromServer(ROOM_NAME_NOT_UNIQUE_ERR)
+    return nil
+  }
   var newRoom = Room{
     name: roomName,
     clientList: make([]*Client, 0),//room will start empty, we wont add the creator in
@@ -63,9 +68,18 @@ func createRoom(roomName string, roomCreator *Client) Room {
     creator: roomCreator,
   }
   RoomArray = append(RoomArray, &newRoom);
-  return newRoom;
+  return &newRoom;
 }
 
+//checks the room name against the current list of rooms to make sure it is unique, returns true if it is, false if not
+func isRoomNameUnique(roomName string) bool{
+  for _, room := range RoomArray {
+    if roomName == room.name{
+      return false
+    }
+  }
+  return true
+}
 //returns true if a user is already in the room, false otherwise
 func (room Room) isClientInRoom(client *Client) bool {
   for _, roomClient := range room.clientList {
@@ -110,6 +124,32 @@ type Client struct
   name string;
 }
 
+/*
+Takes in a connection and creates a Client for it,
+ adds a read and write listener and starts them on seperate GO threads
+ as well as opens the output chan
+*/
+func addClient(conn net.Conn){
+   createReader := bufio.NewReader(conn);
+   createWriter := bufio.NewWriter(conn);
+   createOutputChannel := make(chan string);
+   createName := myUtils.GenerateName();
+
+    var cli  = Client{
+    connection: conn,
+    readListener: *createReader,
+    writeListener: *createWriter,
+    currentRoom: nil, //starts as nil because the user is not initally in a room
+    outputChannel: createOutputChannel,
+    name: createName,
+  }
+
+  ClientArray = append(ClientArray, cli);
+  defer cli.messageClientFromServer("Welcome to the Server, Your username for this session is: "+cli.name);
+  go cli.WaitForARead();
+  go cli.WaitForAWrite();
+}
+
 //this funciton watches the clients output channel, when something is added to the channel,
 func (cli *Client) WaitForAWrite(){
   //looping forever
@@ -134,13 +174,14 @@ func (cli *Client) WaitForAWrite(){
 }
 
 //adds message to the clients output channel, messages should be single line, NON delimited strings, that is the message should not include a new line
+//the name of the sender will be added to the message to form a final message in the form of "sender says: message\n"
 func (cli Client) messageClientFromClient(message string, sender *Client){
   message = string(sender.name)+" says: "+message+"\n";
   cli.outputChannel <- message;
 }
 
 //without a client argument assumes the message is coming from the server
-func (cli Client) messageClient(message string){
+func (cli Client) messageClientFromServer(message string){
   message = "Server says: "+message+"\n";
   cli.outputChannel <- message;
 }
@@ -158,38 +199,12 @@ func (cli *Client)WaitForARead(){
 }
 /**********************************/
 
-/*
-Takes in a connection and creates a Client for it,
- adds a read and write listener and starts them on seperate GO threads
- as well as opens the output chan
-*/
-func addClient(conn net.Conn){
-   createReader := bufio.NewReader(conn);
-   createWriter := bufio.NewWriter(conn);
-   createOutputChannel := make(chan string);
-   createName := myUtils.GenerateName();
-
-    var cli  = Client{
-    connection: conn,
-    readListener: *createReader,
-    writeListener: *createWriter,
-    currentRoom: nil, //starts as nil because the user is not initally in a room
-    outputChannel: createOutputChannel,
-    name: createName,
-  }
-
-  ClientArray = append(ClientArray, cli);
-  defer cli.messageClient("Welcome to the Server, Your username for this session is: "+cli.name);
-  go cli.WaitForARead();
-  go cli.WaitForAWrite();
-}
-
 //sends a message to the clients current room, this function will replacee the WriteToAllChans function which sends a message to every client on the server
 func sendMessageToCurrentRoom(sender *Client, message string){
-//TODO check if the client is currently in a room warn otherwise
+//check if the client is currently in a room warn otherwise
 if sender.currentRoom == nil {
   //sender is not in room yet warn and exit
-  sender.messageClient(NOT_IN_ROOM_ERR);
+  sender.messageClientFromServer(NOT_IN_ROOM_ERR);
   return;
 }
 //get the current room and its list of clients
@@ -214,7 +229,7 @@ room.chatLog = append(room.chatLog, chatMessage);
 func WriteToAllChans(message string, senderClient *Client){
   for i := range ClientArray {
     if senderClient.connection != ClientArray[i].connection{
-      ClientArray[i].messageClient(message);
+      ClientArray[i].messageClientFromServer(message);
     }
   }
 }
@@ -238,7 +253,7 @@ func checkForCommand(message string, client *Client) {
     } else if parsedCommand[0] == CREATE_ROOM_COMMAND {
       // not enough arguments to the command
       if len(parsedCommand) < 2{
-        client.messageClient(NO_ROOM_NAME_GIVEN_ERR)
+        client.messageClientFromServer(NO_ROOM_NAME_GIVEN_ERR)
       }else{
         processCreateRoomCommand(client, parsedCommand[1]);
       }
@@ -247,7 +262,7 @@ func checkForCommand(message string, client *Client) {
     } else if parsedCommand[0] == JOIN_ROOM_COMMAND {
       //not enough given to the command
       if len(parsedCommand) < 2{
-        client.messageClient(NO_ROOM_NAME_GIVEN_ERR)
+        client.messageClientFromServer(NO_ROOM_NAME_GIVEN_ERR)
       }else{
         processJoinRoomCommand(client, parsedCommand[1]);
       }
@@ -267,27 +282,29 @@ func checkForCommand(message string, client *Client) {
 func processCurrRoomUsersCommand(client *Client){
   //check if the user is in a room
   if client.currentRoom == nil{
-    client.messageClient(NOT_IN_ROOM_ERR)
+    client.messageClientFromServer(NOT_IN_ROOM_ERR)
     return
   }
-  client.messageClient("Current users in "+client.currentRoom.name+" are:")
+  client.messageClientFromServer("Current users in "+client.currentRoom.name+" are:")
   for _, users:= range client.currentRoom.clientList {
-    client.messageClient("> "+users.name);
+    client.messageClientFromServer(users.name);
   }
 }
+
+
 //sends a message to the client telling them which room they are currently in, if not in a room, inform the user
  func processCurrRoomCommand (client *Client){
    if client.currentRoom == nil{
-     client.messageClient(NOT_IN_ROOM_ERR)
+     client.messageClientFromServer(NOT_IN_ROOM_ERR)
      return
    }
-   client.messageClient("current room: "+client.currentRoom.name);
+   client.messageClientFromServer("current room: "+client.currentRoom.name);
  }
 
 //Loops through the HELP_INFO array and sends all the lines of help info to the user
 func processHelpCommand(client *Client){
        for _, helpLine := range HELP_INFO{
-         client.messageClient(helpLine);
+         client.messageClientFromServer(helpLine);
        }
 }
 
@@ -300,16 +317,19 @@ func processQuitCommand(client *Client){
 //creates a room and logs to the console
 func processCreateRoomCommand(client *Client, roomName string){
   room := createRoom(roomName, client);
+  if room == nil { //name of room was not unique
+    return
+  }
   fmt.Println(room.creator.name+" created a room called: "+room.name)
 }
 
 //sends the list of rooms to the client
 func processListRoomsCommand(client *Client){
-  client.messageClient("List of rooms:")
+  client.messageClientFromServer("List of rooms:")
   for _, roomName := range RoomArray{
-    client.messageClient(roomName.name);
+    client.messageClientFromServer(roomName.name);
   }
-  client.messageClient("");
+  client.messageClientFromServer("");
 }
 
 //returns true of the room was joined successfully, returns false if there was a problem like the room does not exist
@@ -318,7 +338,7 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   roomToJoin := getRoomByName(roomName);
   if roomToJoin == nil{ //the room doesnt exist
     fmt.Println(client.name+" tried to enter room: "+roomName+" which does not exist");
-    client.messageClient("The room "+roomName+"does not exist")
+    client.messageClientFromServer("The room "+roomName+"does not exist")
     return false;
   }
   //Room exists so now we can join it.
@@ -332,7 +352,7 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   //switch users current room to room
   client.currentRoom = roomToJoin;
   fmt.Println(client.name+" has joined room: "+client.currentRoom.name)
-  client.messageClient("You have joined: "+client.currentRoom.name)
+  client.messageClientFromServer("You have joined: "+client.currentRoom.name)
   //display all messages in the room
   displayRoomsMessages(client, roomToJoin)
   //
@@ -341,11 +361,15 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
 //diplays to the user all the messages of the chatroom, intended to be used when a user first joins a room
 func displayRoomsMessages(client *Client, room *Room){
   //loop through the chatlog and send the user everything
-  client.messageClient("-----Previous Log-----")
+  //just so the user doesnt get an empty message
+  if room.chatLog == nil{
+    return
+  }
+  client.messageClientFromServer("-----Previous Log-----")
   for _, messages := range room.chatLog {
     client.messageClientFromClient(messages.message, messages.client)
   }
-  client.messageClient("----------------------")
+  client.messageClientFromServer("----------------------")
 
 }
 //checks to see if a room with the given name exists in the RoomArray, if it does return it, if not return nil
@@ -364,7 +388,7 @@ func getRoomByName(roomName string) *Room{
 func main() {
   fmt.Println("Launching server...")
   //Start the server on the constant IP and port
-  ln, connectError := net.Listen("tcp", SERVER_IP+":"+SERVER_PORT)
+  ln, connectError := net.Listen("tcp", ":"+SERVER_PORT)
   //check for errors in the server starup
   if connectError != nil {
     fmt.Println("Error Launching server "+ connectError.Error())
