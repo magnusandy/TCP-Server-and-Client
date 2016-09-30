@@ -15,6 +15,8 @@ const COMMAND_PREFIX string = "/";
 const NOT_IN_ROOM_ERR string = "You are not in a room yet";
 const NO_ROOM_NAME_GIVEN_ERR string = "You must specify a room name";
 const ROOM_NAME_NOT_UNIQUE_ERR string = "The room name you have specified is already in use.";
+const CLIENT_LEFT_ROOM_MESSAGE string = "CLIENT HAS LEFT THE ROOM";
+const CLIENT_JOINED_ROOM_MESSAGE string = "CLIENT HAS JOINED THE ROOM";
 
 
 //COMMANDS
@@ -25,7 +27,10 @@ const LIST_ROOMS_COMMAND string = COMMAND_PREFIX+"listRooms"
 const JOIN_ROOM_COMMAND string = COMMAND_PREFIX+"join";//   /join roomname will add a user to a rooms list of clients and switch the user to that room
 const CURR_ROOM_COMMAND string = COMMAND_PREFIX+"currentRoom";
 const CURR_ROOM_USERS_COMMAND string = COMMAND_PREFIX+"currentUsers";
-const LEAVE_ROOM_COMMAND string = COMMAND_PREFIX+"leaveRoom";//TODO
+const LEAVE_ROOM_COMMAND string = COMMAND_PREFIX+"leaveRoom";
+//TODO handle deleting the rooms after they have been around for too long
+//TODO handle up to 10 concurrent users
+//TODO make sure to clean up the client array as people leave
 
 var HELP_INFO = [...]string {"help and command info: ",
  HELP_COMMAND+": use this command to get some help",
@@ -35,7 +40,7 @@ var HELP_INFO = [...]string {"help and command info: ",
  JOIN_ROOM_COMMAND+" roomName: adds you to a chatroom",
  CURR_ROOM_COMMAND+": tells you what your current room is",
  CURR_ROOM_USERS_COMMAND+": gives a you a list of users in a room",
- LEAVE_ROOM_COMMAND+" roomName: removes you from specified room",
+ LEAVE_ROOM_COMMAND+" removes you from current room",
 }
 var MessageStorageArray []string;
 var connectionArray []net.Conn;
@@ -117,8 +122,8 @@ func createChatMessage(cli *Client, mess string) *ChatMessage {
 type Client struct
 {
   connection net.Conn;
-  readListener bufio.Reader;
-  writeListener bufio.Writer;
+  readListener *bufio.Reader;
+  writeListener *bufio.Writer;
   currentRoom *Room;
   outputChannel chan string;
   name string;
@@ -137,8 +142,8 @@ func addClient(conn net.Conn){
 
     var cli  = Client{
     connection: conn,
-    readListener: *createReader,
-    writeListener: *createWriter,
+    readListener: createReader,
+    writeListener: createWriter,
     currentRoom: nil, //starts as nil because the user is not initally in a room
     outputChannel: createOutputChannel,
     name: createName,
@@ -155,7 +160,7 @@ func (cli *Client) WaitForAWrite(){
   //looping forever
     //loop watching the clients output channel
     for output := range cli.outputChannel {
-      if cli.connection == nil {
+      if cli.connection == nil || cli.writeListener == nil {
         return;
       }
       _, error := cli.writeListener.WriteString(output)
@@ -163,7 +168,6 @@ func (cli *Client) WaitForAWrite(){
         fmt.Println(error)
         break
       }
-      fmt.Println(output)
       //flushing is necessary, the writeString only takes in the string, the flush function pushes it out to the user
       flushError := cli.writeListener.Flush()
       if flushError != nil {
@@ -190,9 +194,18 @@ func (cli Client) messageClientFromServer(message string){
 
 //Intended to be run on a thread, this function will wait and lisen for messages from the client
 func (cli *Client)WaitForARead(){
+
   for{
-    message, _ := cli.readListener.ReadString('\n')
+    if cli.connection == nil || cli.writeListener == nil {
+      return;
+    }
+    message, err := cli.readListener.ReadString('\n')
+    if err != nil{
+      //if a client exits wrongly this will happen
+      processQuitCommand(cli)
+    }
     fmt.Print("Message Received:", string(message))
+
     checkForCommand(message, cli);
     //WriteToAllChans(message, cli);
   }
@@ -210,9 +223,9 @@ if sender.currentRoom == nil {
 //get the current room and its list of clients
 //send the message to everyone in the room list that is CURRENTLY in the room
 room := sender.currentRoom;
-room2 := getRoomByName(room.name)
-fmt.Println(room.clientList)
-fmt.Println(room2.clientList)
+//room2 := getRoomByName(room.name)
+//fmt.Println(room.clientList)
+//fmt.Println(room2.clientList)
 chatMessage := createChatMessage(sender, message);
 for _, roomUser := range room.clientList {
   //check to see if the user is currently active in the room
@@ -270,6 +283,8 @@ func checkForCommand(message string, client *Client) {
       processCurrRoomCommand(client);
     }else if parsedCommand[0] == CURR_ROOM_USERS_COMMAND{
       processCurrRoomUsersCommand(client);
+    }else if parsedCommand[0] == LEAVE_ROOM_COMMAND{
+      processLeaveRoomCommand(client)
     }
 
   } else { // message is not a command
@@ -277,6 +292,10 @@ func checkForCommand(message string, client *Client) {
   }
 }
 
+func processLeaveRoomCommand(client *Client){
+  removeClientFromCurrentRoom(client);
+  client.messageClientFromServer("You have left the room.")
+}
 
 //sends a list of the current users in the room to the client
 func processCurrRoomUsersCommand(client *Client){
@@ -310,8 +329,12 @@ func processHelpCommand(client *Client){
 
 //quits the client from the server
 func processQuitCommand(client *Client){
+  client.messageClientFromServer("Goodbye");
   client.connection.Close();
   client.connection = nil;
+  client.writeListener = nil;
+  client.readListener = nil;
+  removeClientFromCurrentRoom(client);
 }
 
 //creates a room and logs to the console
@@ -320,7 +343,9 @@ func processCreateRoomCommand(client *Client, roomName string){
   if room == nil { //name of room was not unique
     return
   }
-  fmt.Println(room.creator.name+" created a room called: "+room.name)
+  message := room.creator.name+" created a room called: "+room.name
+  fmt.Println(message)
+  client.messageClientFromServer(message)
 }
 
 //sends the list of rooms to the client
@@ -345,18 +370,37 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   //check if user is already in the room
   //add user to room if not in it already
   if roomToJoin.isClientInRoom(client) {
-    //already in there so no worries
+      //all good
   } else {
+    removeClientFromCurrentRoom(client);
     roomToJoin.clientList = append(roomToJoin.clientList, client);// add client to the rooms list
   }
   //switch users current room to room
   client.currentRoom = roomToJoin;
   fmt.Println(client.name+" has joined room: "+client.currentRoom.name)
-  client.messageClientFromServer("You have joined: "+client.currentRoom.name)
+  sendMessageToCurrentRoom(client, CLIENT_JOINED_ROOM_MESSAGE)
   //display all messages in the room
   displayRoomsMessages(client, roomToJoin)
   //
   return true
+}
+
+func removeClientFromCurrentRoom(cli *Client){
+//not in a current room so just return
+  if cli.currentRoom == nil {
+    return;
+  } else {
+    sendMessageToCurrentRoom(cli, CLIENT_LEFT_ROOM_MESSAGE)
+    cl := cli.currentRoom.clientList;
+    for i,roomClients := range cl{
+      if cli == roomClients {
+        cli.currentRoom.clientList = append(cl[:i], cl[i+1:]...)//deletes the element
+      }
+    }
+    cli.currentRoom = nil;
+    return
+  }
+
 }
 //diplays to the user all the messages of the chatroom, intended to be used when a user first joins a room
 func displayRoomsMessages(client *Client, room *Room){
