@@ -150,7 +150,7 @@ func addClient(conn net.Conn){
   }
 
   ClientArray = append(ClientArray, cli);
-  defer cli.messageClientFromServer("Welcome to the Server, Your username for this session is: "+cli.name);
+  defer cli.messageClientFromServer("Welcome to Andrew Chat Server, Your username for this session is: "+cli.name);
   go cli.WaitForARead();
   go cli.WaitForAWrite();
 }
@@ -229,8 +229,7 @@ room := sender.currentRoom;
 chatMessage := createChatMessage(sender, message);
 for _, roomUser := range room.clientList {
   //check to see if the user is currently active in the room
-  fmt.Println(room.clientList)
-  if ((roomUser.currentRoom.name == room.name) && (roomUser.name != sender.name)) {
+  if ((roomUser.currentRoom.name == room.name)) {
     roomUser.messageClientFromClient(chatMessage.message, chatMessage.client)
   }
 }
