@@ -34,8 +34,8 @@ func getfromUser(conn net.Conn){
 //starts up the client, starts the recieving thread and the input threads and then loops forever
 func main() {
   // connect to this socket
-//  conn, _ := net.Dial("tcp", "45.55.235.148:25563")
-  conn, _ := net.Dial("tcp", "localhost:8080")
+  conn, _ := net.Dial("tcp", "45.55.235.148:25563")
+//  conn, _ := net.Dial("tcp", "localhost:8080")
   go getFromServer(conn);
   go getfromUser(conn);
   for stayAlive {

@@ -329,11 +329,11 @@ func processHelpCommand(client *Client){
 //quits the client from the server
 func processQuitCommand(client *Client){
   client.messageClientFromServer("Goodbye");
+  removeClientFromCurrentRoom(client);
   client.connection.Close();
   client.connection = nil;
   client.writeListener = nil;
   client.readListener = nil;
-  removeClientFromCurrentRoom(client);
 }
 
 //creates a room and logs to the console
@@ -360,7 +360,9 @@ func processListRoomsCommand(client *Client){
 func processJoinRoomCommand(client *Client, roomName string) bool{
   //start by checking if the room exists
   roomToJoin := getRoomByName(roomName);
+  fmt.Println("here")
   if roomToJoin == nil{ //the room doesnt exist
+    fmt.Println("here")
     fmt.Println(client.name+" tried to enter room: "+roomName+" which does not exist");
     client.messageClientFromServer("The room "+roomName+"does not exist")
     return false;
