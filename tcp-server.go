@@ -150,8 +150,7 @@ func addClient(conn net.Conn){
   }
 
   ClientArray = append(ClientArray, cli);
-  fmt.Println(ClientArray);
-  defer cli.messageClientFromServer("Welcome to Andrew Chat Server, Your username for this session is: "+cli.name);
+  defer cli.messageClientFromServer("Welcome to Andrew's Chat Server, Your username for this session is: "+cli.name+" type /help for commands");
   go cli.WaitForARead();
   go cli.WaitForAWrite();
 }
@@ -224,9 +223,6 @@ if sender.currentRoom == nil {
 //get the current room and its list of clients
 //send the message to everyone in the room list that is CURRENTLY in the room
 room := sender.currentRoom;
-//room2 := getRoomByName(room.name)
-//fmt.Println(room.clientList)
-//fmt.Println(room2.clientList)
 chatMessage := createChatMessage(sender, message);
 for _, roomUser := range room.clientList {
   //check to see if the user is currently active in the room
@@ -373,9 +369,7 @@ func processListRoomsCommand(client *Client){
 func processJoinRoomCommand(client *Client, roomName string) bool{
   //start by checking if the room exists
   roomToJoin := getRoomByName(roomName);
-  fmt.Println("here")
   if roomToJoin == nil{ //the room doesnt exist
-    fmt.Println("here")
     fmt.Println(client.name+" tried to enter room: "+roomName+" which does not exist");
     client.messageClientFromServer("The room "+roomName+" does not exist")
     return false;
