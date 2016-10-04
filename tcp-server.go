@@ -6,20 +6,24 @@ import "bufio"
 import "./myUtils"
 import "time"
 import "strings"
+import "strconv"
 //import "reflect"
 
 //CONSTANTS
 const SERVER_IP string = "localhost";
 const SERVER_PORT string = "8080";
-const COMMAND_PREFIX string = "/";
 const NOT_IN_ROOM_ERR string = "You are not in a room yet";
 const NO_ROOM_NAME_GIVEN_ERR string = "You must specify a room name";
-const ROOM_NAME_NOT_UNIQUE_ERR string = "The room name you have specified is already in use.";
+const ROOM_NAME_NOT_UNIQUE_ERR string = "The room name you have specified is already in use";
 const CLIENT_LEFT_ROOM_MESSAGE string = "CLIENT HAS LEFT THE ROOM";
 const CLIENT_JOINED_ROOM_MESSAGE string = "CLIENT HAS JOINED THE ROOM";
+const MAX_CLIENTS int = 10;
+const DAY_DURATION time.Duration = 24*time.Hour;
+const ROOM_DURATION_DAYS time.Duration = 7*DAY_DURATION;
 
 
 //COMMANDS
+const COMMAND_PREFIX string = "/";
 const HELP_COMMAND string = COMMAND_PREFIX+"help";
 const QUIT_COMMAND string = COMMAND_PREFIX+"quit";
 const CREATE_ROOM_COMMAND string = COMMAND_PREFIX+"createRoom"; //creates a room with the name of the first argument given
@@ -28,11 +32,8 @@ const JOIN_ROOM_COMMAND string = COMMAND_PREFIX+"join";//   /join roomname will 
 const CURR_ROOM_COMMAND string = COMMAND_PREFIX+"currentRoom";
 const CURR_ROOM_USERS_COMMAND string = COMMAND_PREFIX+"currentUsers";
 const LEAVE_ROOM_COMMAND string = COMMAND_PREFIX+"leaveRoom";
-//TODO handle deleting the rooms after they have been around for too long
-//TODO handle up to 10 concurrent users
-//TODO make sure to clean up the client array as people leave
 
-var HELP_INFO = [...]string {"help and command info: ",
+var HELP_INFO = [...]string {"help and command info:",
  HELP_COMMAND+": use this command to get some help",
  QUIT_COMMAND+": Safely exit the system",
  CREATE_ROOM_COMMAND+" roomName : creates a room with the name roomName",
@@ -43,7 +44,6 @@ var HELP_INFO = [...]string {"help and command info: ",
  LEAVE_ROOM_COMMAND+" removes you from current room",
 }
 var MessageStorageArray []string;
-var connectionArray []net.Conn;
 var ClientArray []Client;
 var RoomArray []*Room;
 //STRUCTURES
@@ -52,7 +52,7 @@ type Room struct{
   name string;
   clientList []*Client;
   createdDate time.Time;
-  lastUsedDate time.Time;
+  lastUsedDate time.Time;//This date is updated when clients leave the room, a room will be deleted if it hasnt been accessed in 7 days AND its empty
   chatLog []*ChatMessage;
   creator *Client;
 }
@@ -150,6 +150,7 @@ func addClient(conn net.Conn){
   }
 
   ClientArray = append(ClientArray, cli);
+  fmt.Println(ClientArray);
   defer cli.messageClientFromServer("Welcome to Andrew Chat Server, Your username for this session is: "+cli.name);
   go cli.WaitForARead();
   go cli.WaitForAWrite();
@@ -330,10 +331,22 @@ func processHelpCommand(client *Client){
 func processQuitCommand(client *Client){
   client.messageClientFromServer("Goodbye");
   removeClientFromCurrentRoom(client);
+  removeClientFromSystem(client);
   client.connection.Close();
   client.connection = nil;
   client.writeListener = nil;
   client.readListener = nil;
+}
+
+//This function will remove the client from the Client Array, this function is intended to be used as part of the processQuitCommand
+func removeClientFromSystem(client *Client){
+  //finds the client and removes them from the ClientArray
+  for i,systemClients := range ClientArray{
+    if client.name == systemClients.name {
+      ClientArray = append(ClientArray[:i], ClientArray[i+1:]...)//deletes the element
+    }
+  }
+  fmt.Println("there are currently: "+strconv.Itoa(len(ClientArray))+" clients connected");
 }
 
 //creates a room and logs to the console
@@ -364,7 +377,7 @@ func processJoinRoomCommand(client *Client, roomName string) bool{
   if roomToJoin == nil{ //the room doesnt exist
     fmt.Println("here")
     fmt.Println(client.name+" tried to enter room: "+roomName+" which does not exist");
-    client.messageClientFromServer("The room "+roomName+"does not exist")
+    client.messageClientFromServer("The room "+roomName+" does not exist")
     return false;
   }
   //Room exists so now we can join it.
@@ -396,6 +409,7 @@ func removeClientFromCurrentRoom(cli *Client){
     for i,roomClients := range cl{
       if cli == roomClients {
         cli.currentRoom.clientList = append(cl[:i], cl[i+1:]...)//deletes the element
+        cli.currentRoom.lastUsedDate = time.Now();
       }
     }
     cli.currentRoom = nil;
@@ -427,6 +441,41 @@ func getRoomByName(roomName string) *Room{
   return nil;
 }
 
+//sends a message to the client connection "SERVER FULL" and then closes the connection
+func sendServerIsFullMessage(conn net.Conn){
+  writer := bufio.NewWriter(conn);
+
+  //send FULL Message to Client
+  _, error := writer.WriteString("SERVER FULL")
+  if error != nil{
+    fmt.Println(error)
+  }
+  //flushing is necessary, the writeString only takes in the string, the flush function pushes it out to the user
+  flushError := writer.Flush()
+  if flushError != nil {
+    fmt.Println(flushError)
+  }
+
+  conn.Close();
+}
+
+//intended to be run continously on a thread, this function will look at the usage of rooms and if the room hasent been used for 7 days,
+// it will be closed. If a room has no active users and the last user left over 7 days ago the room will be closed. this function will check the room
+//status every minute
+func manageRooms(){
+  for{ //loop forever
+    for i, rooms := range RoomArray{
+      //for each room in the array we need to check if its been used, if not, remove it
+      sinceLastUsed := time.Since(rooms.lastUsedDate)
+      if len(rooms.clientList) == 0 && sinceLastUsed > ROOM_DURATION_DAYS{ //room is empty and time since use is longer than allowed duration
+        RoomArray = append(RoomArray[:i], RoomArray[i+1:]...)//deletes the element
+      }
+      //else don't do anything
+    }
+    time.Sleep(time.Minute)//sleep the loop to lower processing
+  }
+}
+
 
 
 //Main function for starting the server, will open the server on the SERVER_IP and the SERVER_PORT
@@ -440,12 +489,14 @@ func main() {
   }else{
     fmt.Println("Server Started")
   }
-  //Initialize the connectionArray, this will hold all the incoming connections
-  connectionArray = make([]net.Conn, 0);
+  go manageRooms();//start the room manager
   // run loop forever, accept connections when they come and add them to the connection array and then call the addClient function one
   for {
     conn, _ := ln.Accept()
-    connectionArray = append(connectionArray, conn)
-    addClient(conn);
+    if len(ClientArray) < MAX_CLIENTS{//server can have more clients
+      addClient(conn);
+    }else{
+      sendServerIsFullMessage(conn)
+    }
   }
 }
