@@ -10,8 +10,8 @@ import "strconv"
 //import "reflect"
 
 //CONSTANTS
-const SERVER_IP string = "localhost";
-const SERVER_PORT string = "8080";
+const SERVER_IP string = "";
+const SERVER_PORT string = "25563";
 const NOT_IN_ROOM_ERR string = "You are not in a room yet";
 const NO_ROOM_NAME_GIVEN_ERR string = "You must specify a room name";
 const ROOM_NAME_NOT_UNIQUE_ERR string = "The room name you have specified is already in use";
@@ -161,17 +161,32 @@ func (cli *Client) WaitForAWrite(){
     //loop watching the clients output channel
     for output := range cli.outputChannel {
       if cli.connection == nil || cli.writeListener == nil {
-        return;
+        fmt.Println("Problem with the useres writere or connection during waitforawrite")
+	processQuitCommand(cli)
+	return;
       }
+	//try Read from the client connection to detect timeouts or other interruptions
+	byteBuffer := make([]byte, 2048)
+	_, err := cli.connection.Read(byteBuffer)
+	if err != nil{
+          fmt.Println("ReadError: ")
+	  fmt.Println(err)
+	  processQuitCommand(cli);
+	  break;
+	}
       _, error := cli.writeListener.WriteString(output)
       if error != nil{
+	fmt.Println("clientWriteError: ")
         fmt.Println(error)
+	processQuitCommand(cli)
         break
       }
       //flushing is necessary, the writeString only takes in the string, the flush function pushes it out to the user
       flushError := cli.writeListener.Flush()
       if flushError != nil {
+	fmt.Println("flushing Error: ")
         fmt.Println(flushError)
+	processQuitCommand(cli)
         break
       }
     }
@@ -224,7 +239,8 @@ if sender.currentRoom == nil {
 //send the message to everyone in the room list that is CURRENTLY in the room
 room := sender.currentRoom;
 chatMessage := createChatMessage(sender, message);
-fmt.Println("current room UserArray: "+room.clientList)
+fmt.Println("current room UserArray: ")
+fmt.Println(room.clientList)
 for _, roomUser := range room.clientList {
   fmt.Println("looping room array user is: "+roomUser.name)
   //check to see if the user is currently active in the room
@@ -327,10 +343,12 @@ func processHelpCommand(client *Client){
 
 //quits the client from the server
 func processQuitCommand(client *Client){
-  client.messageClientFromServer("Goodbye");
+  //client.messageClientFromServer("Goodbye");
   removeClientFromCurrentRoom(client);
   removeClientFromSystem(client);
-  client.connection.Close();
+  if client.connection != nil {
+	client.connection.Close()
+  }
   client.connection = nil;
   client.writeListener = nil;
   client.readListener = nil;
