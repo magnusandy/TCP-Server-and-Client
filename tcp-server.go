@@ -224,7 +224,9 @@ if sender.currentRoom == nil {
 //send the message to everyone in the room list that is CURRENTLY in the room
 room := sender.currentRoom;
 chatMessage := createChatMessage(sender, message);
+fmt.Println("current room UserArray: "+room.clientList)
 for _, roomUser := range room.clientList {
+  fmt.Println("looping room array user is: "+roomUser.name)
   //check to see if the user is currently active in the room
   if ((roomUser.currentRoom.name == room.name)) {
     roomUser.messageClientFromClient(chatMessage.message, chatMessage.client)
