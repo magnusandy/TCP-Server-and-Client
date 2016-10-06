@@ -160,7 +160,9 @@ func addClient(conn net.Conn){
 func (cli *Client) WaitForAWrite(){
   //looping forever
     //loop watching the clients output channel
+    fmt.Println("looking at output channel")
     for output := range cli.outputChannel {
+	fmt.Println("insideoutputchannel")
       if cli.connection == nil || cli.writeListener == nil {
         fmt.Println("Problem with the useres writere or connection during waitforawrite")
 	      processQuitCommand(cli)
