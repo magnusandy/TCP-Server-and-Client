@@ -20,6 +20,7 @@ const CLIENT_JOINED_ROOM_MESSAGE string = "CLIENT HAS JOINED THE ROOM";
 const MAX_CLIENTS int = 10;
 const DAY_DURATION time.Duration = 24*time.Hour;
 const ROOM_DURATION_DAYS time.Duration = 7*DAY_DURATION;
+const TIMEOUT_DURATION time.Duration = 2*time.Minute;
 
 
 //COMMANDS
@@ -206,14 +207,15 @@ func (cli *Client)WaitForARead(){
       return;
     }
     deadlineTime := time.Now().Add(time.Minute);
-    cli.connection.SetReadDeadline(time.Now().Add(5*time.Second))
+    //sets the deadline time of the reader, this means if the client has not sent anything to the server in TIMEOUT_DURATION then the client will be closed and removed
+    cli.connection.SetReadDeadline(time.Now().Add(TIMEOUT_DURATION))
     fmt.Println("current time: ")
     fmt.Println(time.Now())
     fmt.Println("deadline time:")
     fmt.Println(deadlineTime)
     message, err := cli.readListener.ReadString('\n')
     if err != nil{
-      fmt.Println("client Time out Err:")
+      fmt.Println("read Err:")
       fmt.Println(err)
       processTimeout(cli)
     }
@@ -355,7 +357,7 @@ func processQuitCommand(client *Client){
 func processTimeout(client *Client){
   defer processQuitCommand(client)
   client.messageClientFromServer("TIMEOUT")
-  time.Sleep(10*time.Second)
+  time.Sleep(2*time.Second)
 }
 
 //This function will remove the client from the Client Array, this function is intended to be used as part of the processQuitCommand
