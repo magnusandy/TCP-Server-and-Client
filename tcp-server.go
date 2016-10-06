@@ -162,18 +162,9 @@ func (cli *Client) WaitForAWrite(){
     for output := range cli.outputChannel {
       if cli.connection == nil || cli.writeListener == nil {
         fmt.Println("Problem with the useres writere or connection during waitforawrite")
-	processQuitCommand(cli)
-	return;
+	      processQuitCommand(cli)
+	      return;
       }
-	//try Read from the client connection to detect timeouts or other interruptions
-	byteBuffer := make([]byte, 2048)
-	_, err := cli.connection.Read(byteBuffer)
-	if err != nil{
-          fmt.Println("ReadError: ")
-	  fmt.Println(err)
-	  processQuitCommand(cli);
-	  break;
-	}
       _, error := cli.writeListener.WriteString(output)
       if error != nil{
 	fmt.Println("clientWriteError: ")
@@ -214,10 +205,17 @@ func (cli *Client)WaitForARead(){
     if cli.connection == nil || cli.writeListener == nil {
       return;
     }
+    deadlineTime := time.Now().Add(time.Minute);
+    cli.connection.SetReadDeadline(time.Now().Add(5*time.Second))
+    fmt.Println("current time: ")
+    fmt.Println(time.Now())
+    fmt.Println("deadline time:")
+    fmt.Println(deadlineTime)
     message, err := cli.readListener.ReadString('\n')
     if err != nil{
-      //if a client exits wrongly this will happen
-      processQuitCommand(cli)
+      fmt.Println("client Time out Err:")
+      fmt.Println(err)
+      processTimeout(cli)
     }
     fmt.Print("Message Received:", string(message))
 
@@ -352,6 +350,12 @@ func processQuitCommand(client *Client){
   client.connection = nil;
   client.writeListener = nil;
   client.readListener = nil;
+}
+
+func processTimeout(client *Client){
+  defer processQuitCommand(client)
+  client.messageClientFromServer("TIMEOUT")
+  time.Sleep(10*time.Second)
 }
 
 //This function will remove the client from the Client Array, this function is intended to be used as part of the processQuitCommand

@@ -18,6 +18,10 @@ func getFromServer(conn net.Conn){
       fmt.Println("Server is full, please try again later.")
       stayAlive = false;
       return;
+    } else if message == "Server says: TIMEOUT\n" {
+      fmt.Println("You timed out, please reconnect")
+      stayAlive = false;
+      return;
     }
     fmt.Print(message)
   }
