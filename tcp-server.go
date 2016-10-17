@@ -44,8 +44,7 @@ var HELP_INFO = [...]string {"help and command info:",
  CURR_ROOM_USERS_COMMAND+": gives a you a list of users in a room",
  LEAVE_ROOM_COMMAND+" removes you from current room",
 }
-var MessageStorageArray []string;
-var ClientArray []Client;
+var ClientArray []*Client;
 var RoomArray []*Room;
 //STRUCTURES
 /*****************Rooms*****************/
@@ -150,7 +149,7 @@ func addClient(conn net.Conn){
     name: createName,
   }
 
-  ClientArray = append(ClientArray, cli);
+  ClientArray = append(ClientArray, &cli);
   defer cli.messageClientFromServer("Welcome to Andrew's Chat Server, Your username for this session is: "+cli.name+" type /help for commands");
   go cli.WaitForARead();
   go cli.WaitForAWrite();
@@ -222,7 +221,6 @@ func (cli *Client)WaitForARead(){
     fmt.Print("Message Received:", string(message))
 
     checkForCommand(message, cli);
-    //WriteToAllChans(message, cli);
   }
 }
 /**********************************/
@@ -252,14 +250,6 @@ for _, roomUser := range room.clientList {
 room.chatLog = append(room.chatLog, chatMessage);
 }
 
-//writes to all the channels of all the users but the one that posts it, to avoid double posting
-func WriteToAllChans(message string, senderClient *Client){
-  for i := range ClientArray {
-    if senderClient.connection != ClientArray[i].connection{
-      ClientArray[i].messageClientFromServer(message);
-    }
-  }
-}
 
 /*
 Checks if the line sent from the user includes a command
