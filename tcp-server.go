@@ -159,7 +159,9 @@ func addClient(conn net.Conn){
 func (cli *Client) WaitForAWrite(){
   //looping forever
     //loop watching the clients output channel
+    fmt.Println("looking at output channel")
     for output := range cli.outputChannel {
+	fmt.Println("insideoutputchannel")
       if cli.connection == nil || cli.writeListener == nil {
         fmt.Println("Problem with the useres writere or connection during waitforawrite")
 	      processQuitCommand(cli)
@@ -479,7 +481,8 @@ func manageRooms(){
       sinceLastUsed := time.Since(rooms.lastUsedDate)
       if len(rooms.clientList) == 0 && sinceLastUsed > ROOM_DURATION_DAYS{ //room is empty and time since use is longer than allowed duration
         RoomArray = append(RoomArray[:i], RoomArray[i+1:]...)//deletes the element
-      }
+        break //we want to jump out so as not to break 
+	}
       //else don't do anything
     }
     time.Sleep(time.Minute)//sleep the loop to lower processing
