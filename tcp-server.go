@@ -481,7 +481,7 @@ func manageRooms(){
       sinceLastUsed := time.Since(rooms.lastUsedDate)
       if len(rooms.clientList) == 0 && sinceLastUsed > ROOM_DURATION_DAYS{ //room is empty and time since use is longer than allowed duration
         RoomArray = append(RoomArray[:i], RoomArray[i+1:]...)//deletes the element
-        break //we want to jump out so as not to break 
+        break //we want to jump out so as not to break
 	}
       //else don't do anything
     }
@@ -500,7 +500,7 @@ func main() {
   if connectError != nil {
     fmt.Println("Error Launching server "+ connectError.Error())
   }else{
-    fmt.Println("Server Started")
+    fmt.Println("Server Started on port "+SERVER_PORT)
   }
   go manageRooms();//start the room manager
   // run loop forever, accept connections when they come and add them to the connection array and then call the addClient function one
